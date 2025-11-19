@@ -1,0 +1,45 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiTelegramBot", "AiTelegramBot\AiTelegramBot.csproj", "{8114AEB7-0217-4147-92A8-DD75066318D8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AiTelegramBot.Tests", "AiTelegramBot.Tests\AiTelegramBot.Tests.csproj", "{748378C8-F065-4A6D-AB32-05EB296F7302}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Debug|x64.Build.0 = Debug|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Debug|x86.Build.0 = Debug|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Release|x64.ActiveCfg = Release|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Release|x64.Build.0 = Release|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Release|x86.ActiveCfg = Release|Any CPU
+		{8114AEB7-0217-4147-92A8-DD75066318D8}.Release|x86.Build.0 = Release|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Debug|x64.Build.0 = Debug|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Debug|x86.Build.0 = Debug|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Release|Any CPU.Build.0 = Release|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Release|x64.ActiveCfg = Release|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Release|x64.Build.0 = Release|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Release|x86.ActiveCfg = Release|Any CPU
+		{748378C8-F065-4A6D-AB32-05EB296F7302}.Release|x86.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
