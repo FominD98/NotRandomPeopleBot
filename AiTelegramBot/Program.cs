@@ -36,7 +36,7 @@ if (!string.IsNullOrEmpty(loggingSettings.LokiEndpoint) &&
     loggerConfiguration.WriteTo.Http(
         requestUri: loggingSettings.LokiEndpoint,
         queueLimitBytes: 1_000_000,
-        httpClient: new LokiHttpClient("1503274", loggingSettings.GrafanaCloudAccessToken),
+        httpClient: new LokiHttpClient("1298563", loggingSettings.GrafanaCloudAccessToken),
         batchFormatter: new LokiFormatter(loggingSettings.ServiceName, loggingSettings.DeploymentEnvironment));
 }
 
