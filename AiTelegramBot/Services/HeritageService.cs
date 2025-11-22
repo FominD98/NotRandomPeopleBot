@@ -28,7 +28,11 @@ public class HeritageService : IHeritageService
             }
 
             var jsonData = File.ReadAllText(_dataFilePath);
-            var data = JsonSerializer.Deserialize<HeritageObjectsData>(jsonData);
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+            var data = JsonSerializer.Deserialize<HeritageObjectsData>(jsonData, options);
 
             if (data?.Objects != null)
             {
