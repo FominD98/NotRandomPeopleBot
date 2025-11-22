@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace AiTelegramBot.Handlers;
 
@@ -122,9 +123,13 @@ public class MessageHandler
 
         try
         {
+            // Remove custom keyboard
+            var removeKeyboard = new ReplyKeyboardRemove();
+
             await botClient.SendTextMessageAsync(
                 chatId: message.Chat.Id,
-                text: "Генерирую экскурсию для вашего местоположения..."
+                text: "🔍 Изучаю ваше местоположение...\n📝 Готовлю экскурсию...",
+                replyMarkup: removeKeyboard
             );
 
             var result = await _tourGuideService.GenerateTourAsync(location.Latitude, location.Longitude);
@@ -133,14 +138,20 @@ public class MessageHandler
             {
                 await botClient.SendTextMessageAsync(
                     chatId: message.Chat.Id,
-                    text: "Не удалось сгенерировать экскурсию для данного местоположения."
+                    text: "😔 К сожалению, не удалось сгенерировать экскурсию для данного местоположения.\n\n" +
+                          "Попробуйте:\n" +
+                          "• Отправить геолокацию в другой точке Казани\n" +
+                          "• Проверить подключение к интернету\n" +
+                          "• Повторить попытку позже"
                 );
                 return;
             }
 
             await botClient.SendTextMessageAsync(
                 chatId: message.Chat.Id,
-                text: $"📍 {result.Location?.Address}\n\n{result.Text}"
+                text: $"📍 *{result.Location?.Address}*\n\n{result.Text}\n\n" +
+                      "🎧 Слушайте аудио-версию ниже 👇",
+                parseMode: Telegram.Bot.Types.Enums.ParseMode.Markdown
             );
 
             if (result.AudioData != null && result.AudioData.Length > 0)
@@ -149,7 +160,7 @@ public class MessageHandler
                 await botClient.SendVoiceAsync(
                     chatId: message.Chat.Id,
                     voice: InputFile.FromStream(audioStream, "tour.mp3"),
-                    caption: "🎧 Аудио-экскурсия"
+                    caption: $"🎧 Аудио-экскурсия\n📍 {result.Location?.Address}"
                 );
 
                 _logger.LogInformation("Sent tour guide response with audio to user {UserId}", userId);
@@ -157,6 +168,11 @@ public class MessageHandler
             else
             {
                 _logger.LogWarning("Audio generation failed for user {UserId}", userId);
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "ℹ️ Аудио-версия недоступна, но текст экскурсии выше!\n\n" +
+                          "💡 Отправьте /tour чтобы узнать о другом месте"
+                );
             }
         }
         catch (Exception ex)
@@ -164,7 +180,11 @@ public class MessageHandler
             _logger.LogError(ex, "Error processing location from user {UserId}", userId);
             await botClient.SendTextMessageAsync(
                 chatId: message.Chat.Id,
-                text: "Произошла ошибка при генерации экскурсии. Попробуйте позже."
+                text: "❌ Произошла ошибка при генерации экскурсии.\n\n" +
+                      "Пожалуйста, попробуйте:\n" +
+                      "• Отправить /tour и геолокацию снова\n" +
+                      "• Проверить подключение к интернету\n" +
+                      "• Написать администратору, если проблема повторяется"
             );
         }
     }

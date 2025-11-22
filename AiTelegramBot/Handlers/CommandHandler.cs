@@ -65,6 +65,13 @@ public class CommandHandler
             return;
         }
 
+        // Handle tour command with location request
+        if (command == "/tour")
+        {
+            await HandleTourCommand(botClient, message);
+            return;
+        }
+
         string response = command switch
         {
             "/start" => GetStartMessage(message.From?.FirstName, strings),
@@ -84,35 +91,58 @@ public class CommandHandler
 
     private string GetStartMessage(string? userName, LocalizedStrings strings)
     {
-        if (string.IsNullOrEmpty(userName))
-        {
-            return strings.StartMessage;
-        }
-        return string.Format(strings.StartMessageWithName, userName);
+        var greeting = string.IsNullOrEmpty(userName)
+            ? "Привет!"
+            : $"Привет, {userName}!";
+
+        return greeting + "\n\n" +
+               "🏛️ Я - электронный экскурсовод по Казани!\n\n" +
+               "Отправьте мне свою геолокацию, и я расскажу вам:\n" +
+               "• Историю места, где вы находитесь\n" +
+               "• Интересные факты и легенды\n" +
+               "• Архитектурные особенности\n" +
+               "• И озвучу всё это в аудио-формате! 🎧\n\n" +
+               "📍 Нажмите /tour чтобы начать экскурсию\n\n" +
+               "💬 Также вы можете задать мне любой вопрос о Казани и Татарстане!";
     }
 
     private string GetHelpMessage(LocalizedStrings strings)
     {
-        return strings.HelpMessage +
-               strings.HelpCommandStart + "\n" +
-               strings.HelpCommandHelp + "\n" +
-               strings.HelpCommandAbout + "\n" +
-               strings.HelpCommandReset + "\n" +
-               strings.HelpCommandLanguage + "\n" +
-               strings.HelpCommandProvider +
-               strings.HelpMessageFooter;
+        return "📖 Доступные команды:\n\n" +
+               "🗺️ Экскурсии:\n" +
+               "/tour - Начать экскурсию (отправьте геолокацию)\n" +
+               "/start - Главное меню\n\n" +
+               "💬 Общение:\n" +
+               "Просто напишите мне вопрос о Казани, Татарстане или любую другую тему!\n\n" +
+               "⚙️ Настройки:\n" +
+               "/reset - Сбросить историю диалога\n" +
+               "/language - Выбрать язык (русский/татарский)\n" +
+               "/provider - Выбрать AI модель\n" +
+               "/about - О боте\n\n" +
+               "💡 Совет: используйте команду /tour для получения аудио-экскурсий о достопримечательностях Казани!";
     }
 
     private string GetAboutMessage(LocalizedStrings strings)
     {
-        return strings.AboutMessage +
-               strings.AboutDescription + "\n" +
-               strings.AboutCapabilities +
-               strings.AboutCapability1 + "\n" +
-               strings.AboutCapability2 + "\n" +
-               strings.AboutCapability3 + "\n" +
-               strings.AboutCapability4 + "\n" +
-               strings.AboutCapability5;
+        return "🏛️ Электронный экскурсовод по Казани\n\n" +
+               "Я помогу вам узнать больше о городе Казань и Республике Татарстан!\n\n" +
+               "🎯 Мои возможности:\n\n" +
+               "📍 Аудио-экскурсии:\n" +
+               "• Отправьте мне свою геолокацию\n" +
+               "• Получите историческую справку о месте\n" +
+               "• Послушайте аудио-озвучку экскурсии\n\n" +
+               "💬 Консультации:\n" +
+               "• Задайте вопрос о достопримечательностях\n" +
+               "• Узнайте историю Казани и Татарстана\n" +
+               "• Получите рекомендации по маршрутам\n\n" +
+               "🌐 Языки:\n" +
+               "• Русский\n" +
+               "• Татарский (в разработке)\n\n" +
+               "🤖 Технологии:\n" +
+               "• YandexGPT - генерация экскурсий\n" +
+               "• ElevenLabs - озвучка текста\n" +
+               "• Yandex Geocoding - определение адресов\n\n" +
+               "Приятных прогулок по Казани! 🚶‍♂️";
     }
 
     private string HandleResetCommand(long userId, LocalizedStrings strings)
@@ -150,5 +180,33 @@ public class CommandHandler
             chatId: message.Chat.Id,
             text: string.Format(strings.ProviderChanged, providerName)
         );
+    }
+
+    private async Task HandleTourCommand(ITelegramBotClient botClient, TelegramMessage message)
+    {
+        var keyboard = new ReplyKeyboardMarkup(new[]
+        {
+            new KeyboardButton[]
+            {
+                KeyboardButton.WithRequestLocation("📍 Отправить мою геолокацию")
+            }
+        })
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = true
+        };
+
+        await botClient.SendTextMessageAsync(
+            chatId: message.Chat.Id,
+            text: "🗺️ Электронный экскурсовод по Казани\n\n" +
+                  "Отправьте мне свою геолокацию, и я расскажу вам об этом месте:\n" +
+                  "• Историческую справку\n" +
+                  "• Интересные факты\n" +
+                  "• Аудио-экскурсию\n\n" +
+                  "Нажмите на кнопку ниже, чтобы отправить свое местоположение.",
+            replyMarkup: keyboard
+        );
+
+        _logger.LogInformation("Sent location request to user {UserId}", message.From?.Id ?? 0);
     }
 }
