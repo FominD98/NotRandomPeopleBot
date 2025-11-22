@@ -74,6 +74,8 @@ try
             services.AddSingleton<ILocalizationService, LocalizationService>();
             services.AddSingleton<IYandexGeocodingService, YandexGeocodingService>();
             services.AddSingleton<IElevenLabsService, ElevenLabsService>();
+            services.AddSingleton<IHeritageService, HeritageService>();
+            services.AddSingleton<IRouteService, RouteService>();
             services.AddSingleton<YandexGptService>();
             services.AddSingleton<ITourGuideService, TourGuideService>();
             services.AddSingleton<CommandHandler>();

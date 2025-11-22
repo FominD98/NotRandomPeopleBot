@@ -72,6 +72,13 @@ public class CommandHandler
             return;
         }
 
+        // Handle route command with location request
+        if (command == "/route")
+        {
+            await HandleRouteCommand(botClient, message);
+            return;
+        }
+
         string response = command switch
         {
             "/start" => GetStartMessage(message.From?.FirstName, strings),
@@ -102,7 +109,8 @@ public class CommandHandler
                "• Интересные факты и легенды\n" +
                "• Архитектурные особенности\n" +
                "• И озвучу всё это в аудио-формате! 🎧\n\n" +
-               "📍 Нажмите /tour чтобы начать экскурсию\n\n" +
+               "📍 /tour - Начать экскурсию об этом месте\n" +
+               "🗺️ /route - Построить маршрут по достопримечательностям\n\n" +
                "💬 Также вы можете задать мне любой вопрос о Казани и Татарстане!";
     }
 
@@ -110,7 +118,8 @@ public class CommandHandler
     {
         return "📖 Доступные команды:\n\n" +
                "🗺️ Экскурсии:\n" +
-               "/tour - Начать экскурсию (отправьте геолокацию)\n" +
+               "/tour - Аудио-экскурсия о месте (отправьте геолокацию)\n" +
+               "/route - Построить маршрут по достопримечательностям\n" +
                "/start - Главное меню\n\n" +
                "💬 Общение:\n" +
                "Просто напишите мне вопрос о Казани, Татарстане или любую другую тему!\n\n" +
@@ -119,7 +128,7 @@ public class CommandHandler
                "/language - Выбрать язык (русский/татарский)\n" +
                "/provider - Выбрать AI модель\n" +
                "/about - О боте\n\n" +
-               "💡 Совет: используйте команду /tour для получения аудио-экскурсий о достопримечательностях Казани!";
+               "💡 Совет: используйте /tour для аудио-экскурсий и /route для построения маршрутов!";
     }
 
     private string GetAboutMessage(LocalizedStrings strings)
@@ -208,5 +217,38 @@ public class CommandHandler
         );
 
         _logger.LogInformation("Sent location request to user {UserId}", message.From?.Id ?? 0);
+    }
+
+    private async Task HandleRouteCommand(ITelegramBotClient botClient, TelegramMessage message)
+    {
+        var userId = message.From?.Id ?? 0;
+
+        // Set user mode to route
+        MessageHandler.SetUserMode(userId, "route");
+
+        var keyboard = new ReplyKeyboardMarkup(new[]
+        {
+            new KeyboardButton[]
+            {
+                KeyboardButton.WithRequestLocation("📍 Отправить мою геолокацию")
+            }
+        })
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = true
+        };
+
+        await botClient.SendTextMessageAsync(
+            chatId: message.Chat.Id,
+            text: "🗺️ Построение маршрута по Казани\n\n" +
+                  "Отправьте мне свою геолокацию, и я построю оптимальный маршрут:\n" +
+                  "• По ближайшим достопримечательностям\n" +
+                  "• С расчетом расстояний\n" +
+                  "• Со ссылкой на Яндекс.Карты\n\n" +
+                  "Нажмите на кнопку ниже, чтобы отправить свое местоположение.",
+            replyMarkup: keyboard
+        );
+
+        _logger.LogInformation("Sent route location request to user {UserId}", userId);
     }
 }

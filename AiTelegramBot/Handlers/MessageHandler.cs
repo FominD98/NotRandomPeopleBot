@@ -14,7 +14,9 @@ public class MessageHandler
     private readonly IContentFilterService _contentFilterService;
     private readonly ILocalizationService _localizationService;
     private readonly ITourGuideService _tourGuideService;
+    private readonly IRouteService _routeService;
     private readonly ILogger<MessageHandler> _logger;
+    private static readonly Dictionary<long, string> _userModes = new();
 
     public MessageHandler(
         IAiServiceFactory aiServiceFactory,
@@ -22,6 +24,7 @@ public class MessageHandler
         IContentFilterService contentFilterService,
         ILocalizationService localizationService,
         ITourGuideService tourGuideService,
+        IRouteService routeService,
         ILogger<MessageHandler> logger)
     {
         _aiServiceFactory = aiServiceFactory;
@@ -29,7 +32,18 @@ public class MessageHandler
         _contentFilterService = contentFilterService;
         _localizationService = localizationService;
         _tourGuideService = tourGuideService;
+        _routeService = routeService;
         _logger = logger;
+    }
+
+    public static void SetUserMode(long userId, string mode)
+    {
+        _userModes[userId] = mode;
+    }
+
+    public static void ClearUserMode(long userId)
+    {
+        _userModes.Remove(userId);
     }
 
     public async Task HandleTextMessageAsync(ITelegramBotClient botClient, Message message)
@@ -121,6 +135,15 @@ public class MessageHandler
             chatAction: ChatAction.Typing
         );
 
+        // Check if user is in route mode
+        if (_userModes.TryGetValue(userId, out var mode) && mode == "route")
+        {
+            await HandleRouteLocationAsync(botClient, message, location);
+            ClearUserMode(userId);
+            return;
+        }
+
+        // Default to tour mode
         try
         {
             // Remove custom keyboard
@@ -183,6 +206,70 @@ public class MessageHandler
                 text: "❌ Произошла ошибка при генерации экскурсии.\n\n" +
                       "Пожалуйста, попробуйте:\n" +
                       "• Отправить /tour и геолокацию снова\n" +
+                      "• Проверить подключение к интернету\n" +
+                      "• Написать администратору, если проблема повторяется"
+            );
+        }
+    }
+
+    private async Task HandleRouteLocationAsync(ITelegramBotClient botClient, Message message, Location location)
+    {
+        var userId = message.From?.Id ?? 0;
+
+        try
+        {
+            var removeKeyboard = new ReplyKeyboardRemove();
+
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: "🗺️ Ищу ближайшие достопримечательности...\n📍 Строю оптимальный маршрут...",
+                replyMarkup: removeKeyboard
+            );
+
+            var route = await _routeService.BuildRouteAsync(location.Latitude, location.Longitude, maxPoints: 5);
+
+            if (route == null || route.Points.Count == 0)
+            {
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "😔 К сожалению, рядом с вами не найдено объектов культурного наследия.\n\n" +
+                          "Попробуйте:\n" +
+                          "• Отправить геолокацию из центральной части Казани\n" +
+                          "• Приблизиться к Казанскому Кремлю или улице Баумана\n" +
+                          "• Использовать /tour для информации о текущем месте"
+                );
+                return;
+            }
+
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: route.Description
+            );
+
+            if (!string.IsNullOrEmpty(route.YandexMapsUrl))
+            {
+                var keyboard = new InlineKeyboardMarkup(new[]
+                {
+                    InlineKeyboardButton.WithUrl("🗺️ Открыть маршрут в Яндекс.Картах", route.YandexMapsUrl)
+                });
+
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "📱 Нажмите на кнопку ниже, чтобы открыть маршрут в Яндекс.Картах с пошаговой навигацией:",
+                    replyMarkup: keyboard
+                );
+            }
+
+            _logger.LogInformation("Sent route to user {UserId} with {Count} points", userId, route.Points.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building route for user {UserId}", userId);
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: "❌ Произошла ошибка при построении маршрута.\n\n" +
+                      "Пожалуйста, попробуйте:\n" +
+                      "• Отправить /route и геолокацию снова\n" +
                       "• Проверить подключение к интернету\n" +
                       "• Написать администратору, если проблема повторяется"
             );
