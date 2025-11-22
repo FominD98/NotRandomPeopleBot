@@ -79,6 +79,13 @@ public class CommandHandler
             return;
         }
 
+        // Handle route_between command with two locations
+        if (command == "/route_between")
+        {
+            await HandleRouteBetweenCommand(botClient, message);
+            return;
+        }
+
         string response = command switch
         {
             "/start" => GetStartMessage(message.From?.FirstName, strings),
@@ -110,7 +117,8 @@ public class CommandHandler
                "• Архитектурные особенности\n" +
                "• И озвучу всё это в аудио-формате! 🎧\n\n" +
                "📍 /tour - Начать экскурсию об этом месте\n" +
-               "🗺️ /route - Построить маршрут по достопримечательностям\n\n" +
+               "🗺️ /route - Построить маршрут по достопримечательностям\n" +
+               "🛤️ /route_between - Маршрут между двумя точками\n\n" +
                "💬 Также вы можете задать мне любой вопрос о Казани и Татарстане!";
     }
 
@@ -120,6 +128,7 @@ public class CommandHandler
                "🗺️ Экскурсии:\n" +
                "/tour - Аудио-экскурсия о месте (отправьте геолокацию)\n" +
                "/route - Построить маршрут по достопримечательностям\n" +
+               "/route_between - Маршрут между двумя точками (с остановками)\n" +
                "/start - Главное меню\n\n" +
                "💬 Общение:\n" +
                "Просто напишите мне вопрос о Казани, Татарстане или любую другую тему!\n\n" +
@@ -250,5 +259,37 @@ public class CommandHandler
         );
 
         _logger.LogInformation("Sent route location request to user {UserId}", userId);
+    }
+
+    private async Task HandleRouteBetweenCommand(ITelegramBotClient botClient, TelegramMessage message)
+    {
+        var userId = message.From?.Id ?? 0;
+
+        // Set user mode to route_between
+        MessageHandler.SetUserMode(userId, "route_between");
+        MessageHandler.ClearUserRouteState(userId); // Очищаем предыдущее состояние
+
+        var keyboard = new ReplyKeyboardMarkup(new[]
+        {
+            new KeyboardButton[]
+            {
+                KeyboardButton.WithRequestLocation("📍 Отправить начальную точку")
+            }
+        })
+        {
+            ResizeKeyboard = true,
+            OneTimeKeyboard = true
+        };
+
+        await botClient.SendTextMessageAsync(
+            chatId: message.Chat.Id,
+            text: "🛤️ Маршрут между двумя точками\n\n" +
+                  "Я построю маршрут и найду интересные места по пути!\n\n" +
+                  "📍 Шаг 1: Отправьте начальную точку маршрута\n" +
+                  "(или нажмите кнопку ниже)",
+            replyMarkup: keyboard
+        );
+
+        _logger.LogInformation("Started route_between flow for user {UserId}", userId);
     }
 }

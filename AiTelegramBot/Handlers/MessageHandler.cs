@@ -1,9 +1,11 @@
+using AiTelegramBot.Models;
 using AiTelegramBot.Services;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
+using TelegramMessage = Telegram.Bot.Types.Message;
 
 namespace AiTelegramBot.Handlers;
 
@@ -17,6 +19,7 @@ public class MessageHandler
     private readonly IRouteService _routeService;
     private readonly ILogger<MessageHandler> _logger;
     private static readonly Dictionary<long, string> _userModes = new();
+    private static readonly Dictionary<long, UserRouteState> _userRouteStates = new();
 
     public MessageHandler(
         IAiServiceFactory aiServiceFactory,
@@ -46,7 +49,22 @@ public class MessageHandler
         _userModes.Remove(userId);
     }
 
-    public async Task HandleTextMessageAsync(ITelegramBotClient botClient, Message message)
+    public static void SetUserRouteState(long userId, UserRouteState state)
+    {
+        _userRouteStates[userId] = state;
+    }
+
+    public static UserRouteState? GetUserRouteState(long userId)
+    {
+        return _userRouteStates.TryGetValue(userId, out var state) ? state : null;
+    }
+
+    public static void ClearUserRouteState(long userId)
+    {
+        _userRouteStates.Remove(userId);
+    }
+
+    public async Task HandleTextMessageAsync(ITelegramBotClient botClient, TelegramMessage message)
     {
         if (message.Text == null || message.From == null) return;
 
@@ -120,7 +138,7 @@ public class MessageHandler
         }
     }
 
-    public async Task HandleLocationMessageAsync(ITelegramBotClient botClient, Message message)
+    public async Task HandleLocationMessageAsync(ITelegramBotClient botClient, TelegramMessage message)
     {
         if (message.Location == null || message.From == null) return;
 
@@ -136,11 +154,19 @@ public class MessageHandler
         );
 
         // Check if user is in route mode
-        if (_userModes.TryGetValue(userId, out var mode) && mode == "route")
+        if (_userModes.TryGetValue(userId, out var mode))
         {
-            await HandleRouteLocationAsync(botClient, message, location);
-            ClearUserMode(userId);
-            return;
+            if (mode == "route")
+            {
+                await HandleRouteLocationAsync(botClient, message, location);
+                ClearUserMode(userId);
+                return;
+            }
+            else if (mode == "route_between")
+            {
+                await HandleRouteBetweenLocationAsync(botClient, message, location);
+                return;
+            }
         }
 
         // Default to tour mode
@@ -212,7 +238,7 @@ public class MessageHandler
         }
     }
 
-    private async Task HandleRouteLocationAsync(ITelegramBotClient botClient, Message message, Location location)
+    private async Task HandleRouteLocationAsync(ITelegramBotClient botClient, TelegramMessage message, Location location)
     {
         var userId = message.From?.Id ?? 0;
 
@@ -281,6 +307,140 @@ public class MessageHandler
                       "• Отправить /route и геолокацию снова\n" +
                       "• Проверить подключение к интернету\n" +
                       "• Написать администратору, если проблема повторяется"
+            );
+        }
+    }
+
+    private async Task HandleRouteBetweenLocationAsync(ITelegramBotClient botClient, TelegramMessage message, Location location)
+    {
+        var userId = message.From?.Id ?? 0;
+        var state = GetUserRouteState(userId);
+
+        try
+        {
+            // Если это первая точка
+            if (state == null || state.StartLatitude == null)
+            {
+                var newState = new UserRouteState
+                {
+                    UserId = userId,
+                    StartLatitude = location.Latitude,
+                    StartLongitude = location.Longitude,
+                    Mode = "route_between"
+                };
+                SetUserRouteState(userId, newState);
+
+                var removeKeyboard = new ReplyKeyboardRemove();
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "✅ Начальная точка сохранена!\n\n" +
+                          "📍 Теперь отправьте конечную точку маршрута.\n\n" +
+                          "Я найду интересные места по пути между двумя точками.",
+                    replyMarkup: removeKeyboard
+                );
+
+                // Показываем кнопку для второй точки
+                var keyboard = new ReplyKeyboardMarkup(new[]
+                {
+                    new KeyboardButton[]
+                    {
+                        KeyboardButton.WithRequestLocation("📍 Отправить конечную точку")
+                    }
+                })
+                {
+                    ResizeKeyboard = true,
+                    OneTimeKeyboard = true
+                };
+
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "👇 Нажмите кнопку ниже или отправьте геолокацию:",
+                    replyMarkup: keyboard
+                );
+
+                _logger.LogInformation("Saved start point for user {UserId}", userId);
+                return;
+            }
+
+            // Если это вторая точка
+            if (state.EndLatitude == null && state.StartLongitude.HasValue)
+            {
+                state.EndLatitude = location.Latitude;
+                state.EndLongitude = location.Longitude;
+
+                var removeKeyboard = new ReplyKeyboardRemove();
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "🗺️ Строю маршрут между двумя точками...\n📍 Ищу достопримечательности по пути...",
+                    replyMarkup: removeKeyboard
+                );
+
+                var route = await _routeService.BuildRouteBetweenPointsAsync(
+                    state.StartLatitude!.Value, state.StartLongitude.Value,
+                    state.EndLatitude.Value, state.EndLongitude!.Value,
+                    maxPoints: 7
+                );
+
+                // Очищаем состояние и режим
+                ClearUserRouteState(userId);
+                ClearUserMode(userId);
+
+                if (route == null)
+                {
+                    await botClient.SendTextMessageAsync(
+                        chatId: message.Chat.Id,
+                        text: "😔 К сожалению, произошла ошибка при построении маршрута.\n\n" +
+                              "Попробуйте:\n" +
+                              "• Отправить /route_between снова\n" +
+                              "• Проверить подключение к интернету"
+                    );
+                    return;
+                }
+
+                if (route.Points.Count == 0)
+                {
+                    await botClient.SendTextMessageAsync(
+                        chatId: message.Chat.Id,
+                        text: "😔 К сожалению, не удалось построить маршрут.\n\n" +
+                              "Попробуйте отправить /route_between снова."
+                    );
+                    return;
+                }
+
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: route.Description
+                );
+
+                if (!string.IsNullOrEmpty(route.YandexMapsUrl))
+                {
+                    var keyboard = new InlineKeyboardMarkup(new[]
+                    {
+                        InlineKeyboardButton.WithUrl("🗺️ Открыть маршрут в Яндекс.Картах", route.YandexMapsUrl)
+                    });
+
+                    await botClient.SendTextMessageAsync(
+                        chatId: message.Chat.Id,
+                        text: "📱 Нажмите на кнопку ниже, чтобы открыть маршрут в Яндекс.Картах с пошаговой навигацией:",
+                        replyMarkup: keyboard
+                    );
+                }
+
+                _logger.LogInformation("Sent route between points to user {UserId} with {Count} points", userId, route.Points.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building route between points for user {UserId}", userId);
+            ClearUserRouteState(userId);
+            ClearUserMode(userId);
+
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: "❌ Произошла ошибка при построении маршрута.\n\n" +
+                      "Пожалуйста, попробуйте:\n" +
+                      "• Отправить /route_between снова\n" +
+                      "• Проверить подключение к интернету"
             );
         }
     }

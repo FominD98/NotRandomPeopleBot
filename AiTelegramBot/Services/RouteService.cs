@@ -223,6 +223,249 @@ public class RouteService : IRouteService
         return $"https://yandex.ru/maps/?rtext={rtext}&rtt=pd";
     }
 
+    public async Task<TourRoute?> BuildRouteBetweenPointsAsync(double startLatitude, double startLongitude,
+        double endLatitude, double endLongitude, int maxPoints = 7)
+    {
+        try
+        {
+            _logger.LogInformation("Building route between ({StartLat}, {StartLon}) and ({EndLat}, {EndLon})",
+                startLatitude, startLongitude, endLatitude, endLongitude);
+
+            // Вычисляем середину между точками и радиус поиска
+            var midLat = (startLatitude + endLatitude) / 2;
+            var midLon = (startLongitude + endLongitude) / 2;
+            var distance = CalculateDistance(startLatitude, startLongitude, endLatitude, endLongitude);
+
+            // Радиус поиска = половина расстояния + 2км буфер
+            var searchRadius = (distance / 2) + 2.0;
+
+            _logger.LogInformation("Search radius: {Radius}km for distance {Distance}km", searchRadius, distance);
+
+            // Получаем объекты в области между точками
+            var nearbyObjects = await _heritageService.GetNearbyObjectsAsync(midLat, midLon, searchRadius);
+
+            // Фильтруем объекты, которые находятся примерно на пути между точками
+            var objectsOnRoute = nearbyObjects
+                .Where(obj =>
+                {
+                    // Проверяем, что объект не слишком далеко от прямой линии между точками
+                    var distToStart = CalculateDistance(startLatitude, startLongitude, obj.Latitude, obj.Longitude);
+                    var distToEnd = CalculateDistance(endLatitude, endLongitude, obj.Latitude, obj.Longitude);
+                    // Объект на маршруте, если расстояние до него от обеих точек не превышает общее расстояние + буфер
+                    return (distToStart + distToEnd) <= (distance * 1.3); // 30% буфер
+                })
+                .ToList();
+
+            if (objectsOnRoute.Count == 0)
+            {
+                _logger.LogInformation("No objects found on route, using generated points");
+                objectsOnRoute = await CreateRoutePointsBetween(startLatitude, startLongitude,
+                    endLatitude, endLongitude, maxPoints);
+            }
+
+            // Огран ичиваем количество промежуточных точек
+            var selectedObjects = objectsOnRoute.Take(maxPoints).ToList();
+
+            // Строим маршрут с начальной и конечной точкой
+            var route = BuildRouteBetweenPoints(startLatitude, startLongitude,
+                endLatitude, endLongitude, selectedObjects);
+
+            route.Description = GenerateRouteBetweenDescription(route, startLatitude, startLongitude,
+                endLatitude, endLongitude);
+            route.YandexMapsUrl = GenerateYandexMapsUrlBetween(startLatitude, startLongitude,
+                endLatitude, endLongitude, route);
+
+            _logger.LogInformation("Route between points built with {Count} stops, total distance: {Distance:F2}km",
+                route.Points.Count, route.TotalDistance / 1000);
+
+            return route;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building route between points");
+            return null;
+        }
+    }
+
+    private Task<List<HeritageObject>> CreateRoutePointsBetween(double startLat, double startLon,
+        double endLat, double endLon, int maxPoints)
+    {
+        var points = new List<HeritageObject>();
+        var totalDistance = CalculateDistance(startLat, startLon, endLat, endLon);
+
+        // Интересные точки для прогулки с разными темами
+        var routeThemes = new[]
+        {
+            ("🏛️ Архитектурная остановка", "Осмотр зданий",
+             "Обратите внимание на фасады зданий вокруг - ищите интересные балконы, наличники, лепнину и необычные архитектурные детали"),
+
+            ("🌳 Зелёный уголок", "Природа в городе",
+             "Найдите здесь деревья и зелёные насаждения, скамейки для отдыха. Отличное место, чтобы перевести дух"),
+
+            ("📸 Фото-точка", "Панорамный вид",
+             "Осмотритесь - здесь можно сделать хорошие фотографии окрестностей. Попробуйте найти интересный ракурс"),
+
+            ("☕ Местная атмосфера", "Жизнь района",
+             "Загляните в местные кафе или магазинчики, понаблюдайте за ритмом жизни этого района города"),
+
+            ("🎨 Культурный уголок", "Искусство вокруг",
+             "Поищите стрит-арт, граффити, афиши или памятники - здесь может быть скрыто что-то интересное"),
+
+            ("🏘️ Жилой квартал", "История места",
+             "Посмотрите на жилую застройку - старые дворики часто хранят атмосферу прошлых эпох"),
+
+            ("🌆 Видовая точка", "Городской пейзаж",
+             "Найдите возвышенность или открытое пространство для обзора - оцените масштаб города вокруг")
+        };
+
+        var pointsToCreate = Math.Min(maxPoints, routeThemes.Length);
+
+        for (int i = 0; i < pointsToCreate; i++)
+        {
+            var ratio = (double)(i + 1) / (pointsToCreate + 1);
+            var pointLat = startLat + (endLat - startLat) * ratio;
+            var pointLon = startLon + (endLon - startLon) * ratio;
+
+            // Добавляем небольшое смещение, чтобы точки не были на прямой линии
+            var offset = (i % 2 == 0 ? 1 : -1) * 0.0005; // ~50 метров в сторону
+            pointLat += offset;
+
+            var distanceFromStart = totalDistance * ratio;
+            var (name, category, description) = routeThemes[i];
+
+            points.Add(new HeritageObject
+            {
+                Id = $"route_{i + 1}",
+                Name = name,
+                Latitude = pointLat,
+                Longitude = pointLon,
+                Category = category,
+                ShortDescription = $"{description}. Пройдено: {distanceFromStart:F1} км",
+                History = $"Точка {i + 1} на вашем маршруте между двумя локациями",
+                InterestingFacts = new List<string>()
+            });
+        }
+
+        _logger.LogInformation("Created {Count} scenic route points for {Distance:F1}km route", points.Count, totalDistance);
+        return Task.FromResult(points);
+    }
+
+    private TourRoute BuildRouteBetweenPoints(double startLat, double startLon,
+        double endLat, double endLon, List<HeritageObject> objects)
+    {
+        var route = new TourRoute
+        {
+            StartLatitude = startLat,
+            StartLongitude = startLon
+        };
+
+        if (objects.Count == 0)
+            return route;
+
+        // Сортируем объекты по близости к линии маршрута
+        var sortedObjects = objects
+            .Select(obj => new
+            {
+                Object = obj,
+                DistFromStart = CalculateDistance(startLat, startLon, obj.Latitude, obj.Longitude)
+            })
+            .OrderBy(x => x.DistFromStart)
+            .Select(x => x.Object)
+            .ToList();
+
+        var currentLat = startLat;
+        var currentLon = startLon;
+        double totalDistance = 0;
+        int order = 1;
+
+        foreach (var obj in sortedObjects)
+        {
+            var distance = CalculateDistance(currentLat, currentLon, obj.Latitude, obj.Longitude) * 1000;
+            totalDistance += distance;
+
+            route.Points.Add(new RoutePoint
+            {
+                HeritageObject = obj,
+                DistanceFromPrevious = distance,
+                Order = order++
+            });
+
+            currentLat = obj.Latitude;
+            currentLon = obj.Longitude;
+        }
+
+        // Добавляем расстояние до конечной точки
+        var finalDistance = CalculateDistance(currentLat, currentLon, endLat, endLon) * 1000;
+        totalDistance += finalDistance;
+
+        route.TotalDistance = totalDistance;
+        return route;
+    }
+
+    private string GenerateRouteBetweenDescription(TourRoute route, double startLat, double startLon,
+        double endLat, double endLon)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"🛤️ Маршрут от точки А до точки Б");
+        sb.AppendLine($"📏 Общая протяженность: {route.TotalDistance / 1000:F2} км");
+        sb.AppendLine($"📍 Остановок по пути: {route.Points.Count}");
+        sb.AppendLine();
+
+        if (route.Points.Count > 0)
+        {
+            sb.AppendLine("🗺️ Точки по маршруту:");
+            sb.AppendLine();
+
+            foreach (var point in route.Points)
+            {
+                sb.AppendLine($"▫️ {point.Order}. {point.HeritageObject.Name}");
+                sb.AppendLine($"   📂 {point.HeritageObject.Category}");
+
+                if (!string.IsNullOrEmpty(point.HeritageObject.ShortDescription))
+                {
+                    sb.AppendLine($"   ℹ️ {point.HeritageObject.ShortDescription}");
+                }
+
+                if (point.HeritageObject.YearBuilt.HasValue)
+                {
+                    sb.AppendLine($"   📅 Построен в {point.HeritageObject.YearBuilt} году");
+                }
+
+                if (point.HeritageObject.IsUnescoSite)
+                {
+                    sb.AppendLine($"   🏛️ Объект всемирного наследия ЮНЕСКО");
+                }
+
+                sb.AppendLine($"   🚶 {point.DistanceFromPrevious:F0} м от предыдущей точки");
+                sb.AppendLine();
+            }
+
+            // Добавляем информацию о финальном участке
+            var finalDist = CalculateDistance(
+                route.Points.Last().HeritageObject.Latitude,
+                route.Points.Last().HeritageObject.Longitude,
+                endLat, endLon) * 1000;
+            sb.AppendLine($"🏁 До конечной точки: {finalDist:F0} м");
+        }
+
+        return sb.ToString();
+    }
+
+    private string GenerateYandexMapsUrlBetween(double startLat, double startLon,
+        double endLat, double endLon, TourRoute route)
+    {
+        var points = new List<string>
+        {
+            $"{startLat},{startLon}"
+        };
+
+        points.AddRange(route.Points.Select(p => $"{p.HeritageObject.Latitude},{p.HeritageObject.Longitude}"));
+        points.Add($"{endLat},{endLon}");
+
+        var rtext = string.Join("~", points);
+        return $"https://yandex.ru/maps/?rtext={rtext}&rtt=pd";
+    }
+
     // Haversine formula для расчета расстояния между двумя точками на Земле
     private static double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
     {
