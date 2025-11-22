@@ -698,77 +698,137 @@ public class RouteService : IRouteService
             return "Маршрут пуст";
 
         var sb = new StringBuilder();
-        sb.AppendLine("🏛️ МАРШРУТ ПО ОБЪЕКТАМ КУЛЬТУРНОГО НАСЛЕДИЯ");
-        sb.AppendLine($"📜 Все объекты из официального реестра ОКН Республики Татарстан");
+        sb.AppendLine("🏛️ ПРОГУЛКА ПО ИСТОРИЧЕСКИМ МЕСТАМ");
         sb.AppendLine();
-        sb.AppendLine($"🗺️ Маршрут включает {route.Points.Count} объектов:");
-        sb.AppendLine($"📏 Общая протяженность: {route.TotalDistance / 1000:F2} км");
+        sb.AppendLine($"📍 {route.Points.Count} интересных мест");
+        sb.AppendLine($"🚶 Примерно {route.TotalDistance / 1000:F1} км пешком");
+        sb.AppendLine($"⏱️ Около {Math.Max(30, (int)(route.TotalDistance / 1000 * 15))} минут прогулки");
         sb.AppendLine();
 
         foreach (var point in route.Points)
         {
-            sb.AppendLine($"▫️ {point.Order}. {point.HeritageObject.Name}");
+            // Название объекта - убираем лишние даты и технические детали
+            var name = CleanObjectName(point.HeritageObject.Name);
+            sb.AppendLine($"📍 {point.Order}. {name}");
 
-            // Категория объекта
-            if (!string.IsNullOrEmpty(point.HeritageObject.Category))
-            {
-                sb.AppendLine($"   📂 {point.HeritageObject.Category}");
-            }
-
-            // Адрес из реестра
-            if (!string.IsNullOrEmpty(point.HeritageObject.Address))
-            {
-                sb.AppendLine($"   📍 {point.HeritageObject.Address}");
-            }
-
-            // Краткое описание
-            if (!string.IsNullOrEmpty(point.HeritageObject.ShortDescription))
-            {
-                sb.AppendLine($"   ℹ️ {point.HeritageObject.ShortDescription}");
-            }
-
-            // Год постройки
+            // Год постройки - делаем более читаемым
             if (point.HeritageObject.YearBuilt.HasValue)
             {
-                sb.AppendLine($"   📅 Построен в {point.HeritageObject.YearBuilt} году");
+                var age = DateTime.Now.Year - point.HeritageObject.YearBuilt.Value;
+                sb.AppendLine($"   🕰️ {point.HeritageObject.YearBuilt} год (более {age} лет истории)");
             }
 
-            // Категория охраны
-            if (!string.IsNullOrEmpty(point.HeritageObject.ProtectionCategory))
+            // Генерируем краткое описание на основе названия и категории
+            var description = GenerateShortDescription(point.HeritageObject);
+            if (!string.IsNullOrEmpty(description))
             {
-                var protectionLabel = point.HeritageObject.ProtectionCategory switch
-                {
-                    "federal" => "Федеральное значение",
-                    "regional" => "Региональное значение",
-                    "local" => "Местное значение",
-                    _ => point.HeritageObject.ProtectionCategory
-                };
-                sb.AppendLine($"   🛡️ {protectionLabel}");
+                sb.AppendLine($"   💡 {description}");
             }
 
-            // Регистрационный номер в реестре
-            if (!string.IsNullOrEmpty(point.HeritageObject.RegistrationNumber))
-            {
-                sb.AppendLine($"   📋 Рег. номер: {point.HeritageObject.RegistrationNumber}");
-            }
-
-            // Метка ЮНЕСКО
+            // Метка ЮНЕСКО - это важно для туриста!
             if (point.HeritageObject.IsUnescoSite)
             {
-                sb.AppendLine($"   🌍 Объект всемирного наследия ЮНЕСКО");
+                sb.AppendLine($"   🌍 Объект Всемирного наследия ЮНЕСКО!");
             }
 
-            // Расстояние от предыдущей точки
+            // Федеральное значение тоже интересно
+            if (point.HeritageObject.ProtectionCategory == "federal")
+            {
+                sb.AppendLine($"   ⭐ Памятник федерального значения");
+            }
+
+            // Расстояние - более дружелюбно
             if (point.Order > 1)
             {
-                sb.AppendLine($"   🚶 {point.DistanceFromPrevious:F0} м от предыдущей точки");
+                var walkTime = (int)Math.Ceiling(point.DistanceFromPrevious / 80); // ~80м/мин пешком
+                sb.AppendLine($"   → {(int)point.DistanceFromPrevious} м ({walkTime} мин пешком)");
             }
 
             sb.AppendLine();
         }
 
-        sb.AppendLine("📜 Данные из Единого государственного реестра объектов культурного наследия");
+        sb.AppendLine("💡 Нажмите кнопку ниже, чтобы открыть маршрут на карте");
 
         return sb.ToString();
+    }
+
+    private string CleanObjectName(string name)
+    {
+        // Убираем технические детали из названия
+        var cleaned = name;
+
+        // Убираем "арх." и имена архитекторов в конце
+        var archIndex = cleaned.IndexOf(", арх.", StringComparison.OrdinalIgnoreCase);
+        if (archIndex > 0)
+            cleaned = cleaned.Substring(0, archIndex);
+
+        // Убираем повторяющиеся годы типа "1796 г., 1842 г."
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @",?\s*\d{4}\s*г\.?", "");
+
+        // Убираем "начало/конец XIX века" и подобное
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @",?\s*(начало|конец|середина|первая половина|вторая половина|I половина|II половина)?\s*(XVIII|XIX|XX|XXI|17|18|19|20)\s*(в\.?|века?|вв\.?)?", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Убираем лишние пробелы и запятые
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s*,\s*$", "");
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ").Trim();
+
+        return string.IsNullOrWhiteSpace(cleaned) ? name : cleaned;
+    }
+
+    private string GenerateShortDescription(HeritageObject obj)
+    {
+        var nameLower = obj.Name.ToLower();
+
+        // Церкви и храмы
+        if (nameLower.Contains("церковь") || nameLower.Contains("храм") || nameLower.Contains("собор"))
+            return "Православный храм с уникальной архитектурой. Загляните внутрь, если открыто";
+
+        if (nameLower.Contains("мечеть") || nameLower.Contains("минарет"))
+            return "Мусульманская святыня. Обратите внимание на изящный минарет";
+
+        if (nameLower.Contains("часовня"))
+            return "Небольшая часовня - место тишины и умиротворения";
+
+        // Жилые здания
+        if (nameLower.Contains("дом") && (nameLower.Contains("где жил") || nameLower.Contains("в котором жил")))
+            return "Здесь жила известная личность. Представьте, как выглядела жизнь в те времена";
+
+        if (nameLower.Contains("особняк") || nameLower.Contains("усадьба"))
+            return "Богатый купеческий или дворянский дом. Обратите внимание на декор фасада";
+
+        if (nameLower.Contains("дом"))
+            return "Историческое здание. Посмотрите на архитектурные детали фасада";
+
+        // Общественные здания
+        if (nameLower.Contains("гимназия") || nameLower.Contains("училище") || nameLower.Contains("школа") || nameLower.Contains("университет"))
+            return "Историческое учебное заведение. Здесь учились поколения казанцев";
+
+        if (nameLower.Contains("больница") || nameLower.Contains("госпиталь") || nameLower.Contains("клиника"))
+            return "Историческое медицинское учреждение";
+
+        if (nameLower.Contains("театр"))
+            return "Культурный центр города. Загляните на афишу!";
+
+        if (nameLower.Contains("банк"))
+            return "Величественное здание бывшего банка. Обратите внимание на парадный вход";
+
+        // Памятники
+        if (nameLower.Contains("памятник") || nameLower.Contains("монумент") || nameLower.Contains("бюст"))
+            return "Памятник известной личности. Сделайте фото на память!";
+
+        // Кремль и крепости
+        if (nameLower.Contains("кремль") || nameLower.Contains("башня") || nameLower.Contains("стена"))
+            return "Часть древней крепости. Прикоснитесь к многовековой истории";
+
+        // Монастыри
+        if (nameLower.Contains("монастырь"))
+            return "Древняя обитель. Место с особой атмосферой покоя";
+
+        // Торговые здания
+        if (nameLower.Contains("торговый") || nameLower.Contains("гостиный") || nameLower.Contains("пассаж") || nameLower.Contains("базар") || nameLower.Contains("ряды"))
+            return "Историческое торговое место. Раньше здесь кипела торговля";
+
+        // По умолчанию
+        return "Историческое место Казани. Остановитесь и осмотритесь вокруг";
     }
 }
