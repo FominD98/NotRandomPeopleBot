@@ -167,6 +167,12 @@ public class MessageHandler
                 await HandleRouteBetweenLocationAsync(botClient, message, location);
                 return;
             }
+            else if (mode == "heritage")
+            {
+                await HandleHeritageLocationAsync(botClient, message, location);
+                ClearUserMode(userId);
+                return;
+            }
         }
 
         // Default to tour mode
@@ -440,6 +446,78 @@ public class MessageHandler
                 text: "❌ Произошла ошибка при построении маршрута.\n\n" +
                       "Пожалуйста, попробуйте:\n" +
                       "• Отправить /route_between снова\n" +
+                      "• Проверить подключение к интернету"
+            );
+        }
+    }
+
+    private async Task HandleHeritageLocationAsync(ITelegramBotClient botClient, TelegramMessage message, Location location)
+    {
+        var userId = message.From?.Id ?? 0;
+
+        try
+        {
+            var removeKeyboard = new ReplyKeyboardRemove();
+
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: "🏛️ Ищу объекты культурного наследия из реестра...\n📜 Строю маршрут по историческим памятникам...",
+                replyMarkup: removeKeyboard
+            );
+
+            var route = await _routeService.BuildHeritageOnlyRouteAsync(location.Latitude, location.Longitude, maxPoints: 7, radiusKm: 5.0);
+
+            if (route == null)
+            {
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "😔 К сожалению, в радиусе 15 км от вас не найдено объектов культурного наследия из реестра.\n\n" +
+                          "Попробуйте:\n" +
+                          "• Отправить /heritage из другой локации\n" +
+                          "• Использовать /route для обычного маршрута по достопримечательностям"
+                );
+                return;
+            }
+
+            if (route.Points.Count == 0)
+            {
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "😔 Не удалось построить маршрут по объектам культурного наследия.\n\n" +
+                          "Попробуйте отправить /heritage снова."
+                );
+                return;
+            }
+
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: route.Description
+            );
+
+            if (!string.IsNullOrEmpty(route.YandexMapsUrl))
+            {
+                var keyboard = new InlineKeyboardMarkup(new[]
+                {
+                    InlineKeyboardButton.WithUrl("🗺️ Открыть маршрут в Яндекс.Картах", route.YandexMapsUrl)
+                });
+
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "📱 Нажмите на кнопку ниже, чтобы открыть маршрут в Яндекс.Картах с пошаговой навигацией:",
+                    replyMarkup: keyboard
+                );
+            }
+
+            _logger.LogInformation("Sent heritage route to user {UserId} with {Count} objects from registry", userId, route.Points.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building heritage route for user {UserId}", userId);
+            await botClient.SendTextMessageAsync(
+                chatId: message.Chat.Id,
+                text: "❌ Произошла ошибка при построении маршрута по объектам культурного наследия.\n\n" +
+                      "Пожалуйста, попробуйте:\n" +
+                      "• Отправить /heritage и геолокацию снова\n" +
                       "• Проверить подключение к интернету"
             );
         }

@@ -633,4 +633,142 @@ public class RouteService : IRouteService
     {
         return degrees * Math.PI / 180.0;
     }
+
+    public async Task<TourRoute?> BuildHeritageOnlyRouteAsync(double startLatitude, double startLongitude, int maxPoints = 7, double radiusKm = 5.0)
+    {
+        try
+        {
+            _logger.LogInformation("Building heritage-only route from ({Lat}, {Lon})",
+                startLatitude, startLongitude);
+
+            var heritageObjects = new List<HeritageObject>();
+
+            // 1. Определяем район по координатам через геокодинг
+            var locationInfo = await _geocodingService.GetLocationInfoAsync(startLatitude, startLongitude);
+            if (locationInfo != null)
+            {
+                var district = ExtractDistrictFromAddress(locationInfo.Address);
+                _logger.LogInformation("Detected district from address: {District}", district);
+
+                if (!string.IsNullOrEmpty(district))
+                {
+                    // 2. Ищем объекты культурного наследия по району
+                    heritageObjects = await _heritageService.GetByDistrictAsync(district);
+                    _logger.LogInformation("Found {Count} heritage objects in district {District}",
+                        heritageObjects.Count, district);
+                }
+            }
+
+            if (heritageObjects.Count == 0)
+            {
+                _logger.LogWarning("No heritage objects found in the district");
+                return null;
+            }
+
+            // Присваиваем координаты объектам (распределяем вокруг стартовой точки)
+            heritageObjects = AssignCoordinatesToObjects(heritageObjects, startLatitude, startLongitude, maxPoints * 2);
+
+            // Ограничиваем количество точек
+            var selectedObjects = heritageObjects.Take(maxPoints).ToList();
+
+            // Строим оптимальный маршрут методом ближайшего соседа
+            var route = BuildOptimalRoute(startLatitude, startLongitude, selectedObjects);
+
+            // Генерируем описание маршрута для объектов культурного наследия
+            route.Description = GenerateHeritageRouteDescription(route);
+
+            // Генерируем ссылку на Яндекс.Карты
+            route.YandexMapsUrl = GenerateYandexMapsUrl(route);
+
+            _logger.LogInformation("Heritage route built successfully with {Count} points, total distance: {Distance:F2}km",
+                route.Points.Count, route.TotalDistance / 1000);
+
+            return route;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building heritage-only route");
+            return null;
+        }
+    }
+
+    private string GenerateHeritageRouteDescription(TourRoute route)
+    {
+        if (route.Points.Count == 0)
+            return "Маршрут пуст";
+
+        var sb = new StringBuilder();
+        sb.AppendLine("🏛️ МАРШРУТ ПО ОБЪЕКТАМ КУЛЬТУРНОГО НАСЛЕДИЯ");
+        sb.AppendLine($"📜 Все объекты из официального реестра ОКН Республики Татарстан");
+        sb.AppendLine();
+        sb.AppendLine($"🗺️ Маршрут включает {route.Points.Count} объектов:");
+        sb.AppendLine($"📏 Общая протяженность: {route.TotalDistance / 1000:F2} км");
+        sb.AppendLine();
+
+        foreach (var point in route.Points)
+        {
+            sb.AppendLine($"▫️ {point.Order}. {point.HeritageObject.Name}");
+
+            // Категория объекта
+            if (!string.IsNullOrEmpty(point.HeritageObject.Category))
+            {
+                sb.AppendLine($"   📂 {point.HeritageObject.Category}");
+            }
+
+            // Адрес из реестра
+            if (!string.IsNullOrEmpty(point.HeritageObject.Address))
+            {
+                sb.AppendLine($"   📍 {point.HeritageObject.Address}");
+            }
+
+            // Краткое описание
+            if (!string.IsNullOrEmpty(point.HeritageObject.ShortDescription))
+            {
+                sb.AppendLine($"   ℹ️ {point.HeritageObject.ShortDescription}");
+            }
+
+            // Год постройки
+            if (point.HeritageObject.YearBuilt.HasValue)
+            {
+                sb.AppendLine($"   📅 Построен в {point.HeritageObject.YearBuilt} году");
+            }
+
+            // Категория охраны
+            if (!string.IsNullOrEmpty(point.HeritageObject.ProtectionCategory))
+            {
+                var protectionLabel = point.HeritageObject.ProtectionCategory switch
+                {
+                    "federal" => "Федеральное значение",
+                    "regional" => "Региональное значение",
+                    "local" => "Местное значение",
+                    _ => point.HeritageObject.ProtectionCategory
+                };
+                sb.AppendLine($"   🛡️ {protectionLabel}");
+            }
+
+            // Регистрационный номер в реестре
+            if (!string.IsNullOrEmpty(point.HeritageObject.RegistrationNumber))
+            {
+                sb.AppendLine($"   📋 Рег. номер: {point.HeritageObject.RegistrationNumber}");
+            }
+
+            // Метка ЮНЕСКО
+            if (point.HeritageObject.IsUnescoSite)
+            {
+                sb.AppendLine($"   🌍 Объект всемирного наследия ЮНЕСКО");
+            }
+
+            // Расстояние от предыдущей точки
+            if (point.Order > 1)
+            {
+                sb.AppendLine($"   🚶 {point.DistanceFromPrevious:F0} м от предыдущей точки");
+            }
+
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("📜 Данные из Единого государственного реестра объектов культурного наследия");
+
+        return sb.ToString();
+    }
 }
