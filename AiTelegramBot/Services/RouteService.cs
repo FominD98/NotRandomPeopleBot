@@ -15,20 +15,21 @@ public class RouteService : IRouteService
         _logger = logger;
     }
 
-    public async Task<TourRoute?> BuildRouteAsync(double startLatitude, double startLongitude, int maxPoints = 5)
+    public async Task<TourRoute?> BuildRouteAsync(double startLatitude, double startLongitude, int maxPoints = 7)
     {
         try
         {
             _logger.LogInformation("Building route from ({Lat}, {Lon}) with max {MaxPoints} points",
                 startLatitude, startLongitude, maxPoints);
 
-            // Получаем ближайшие объекты в радиусе 2 км
-            var nearbyObjects = await _heritageService.GetNearbyObjectsAsync(startLatitude, startLongitude, 2.0);
+            // Пытаемся получить объекты из базы данных в радиусе 5 км
+            var nearbyObjects = await _heritageService.GetNearbyObjectsAsync(startLatitude, startLongitude, 5.0);
 
+            // Если объектов не нашлось в БД, создаем базовый маршрут с интересными местами
             if (nearbyObjects.Count == 0)
             {
-                _logger.LogWarning("No nearby objects found");
-                return null;
+                _logger.LogInformation("No objects in database, creating basic route with nearby landmarks");
+                nearbyObjects = await CreateBasicLandmarksRoute(startLatitude, startLongitude, maxPoints);
             }
 
             // Ограничиваем количество точек
@@ -53,6 +54,61 @@ public class RouteService : IRouteService
             _logger.LogError(ex, "Error building route");
             return null;
         }
+    }
+
+    private Task<List<HeritageObject>> CreateBasicLandmarksRoute(double latitude, double longitude, int maxPoints)
+    {
+        var landmarks = new List<HeritageObject>();
+
+        // Создаем точки в разных направлениях от стартовой позиции
+        // Расстояния варьируются от 400 до 600 метров (общий маршрут ~4 км)
+        var routePoints = new[]
+        {
+            (0.004, 0.001, "северу", "🏛️ Архитектурная остановка",
+             "Обратите внимание на фасады зданий - ищите старинную кладку, резные наличники и балконы с коваными решётками"),
+
+            (0.005, 0.004, "северо-востоку", "🌳 Зелёная зона",
+             "Найдите здесь деревья-долгожители, уютные скамейки и возможно фонтан или памятник местного значения"),
+
+            (0.002, 0.006, "востоку", "🎨 Культурный уголок",
+             "Ищите граффити, стрит-арт, афиши театров или музыкальные площадки - здесь бьётся культурный пульс района"),
+
+            (-0.001, 0.005, "юго-востоку", "☕ Местная жизнь",
+             "Загляните в местные кафе и магазинчики, понаблюдайте за ритмом повседневной жизни горожан"),
+
+            (-0.004, 0.003, "югу", "🏪 Торговая улица",
+             "Обратите внимание на вывески магазинов, витрины и уличную торговлю - почувствуйте коммерческий дух места"),
+
+            (-0.003, -0.002, "юго-западу", "🌆 Панорамная точка",
+             "Найдите возвышенность или открытое пространство для обзора окрестностей - оцените городской пейзаж"),
+
+            (0.001, -0.003, "западу", "🏘️ Жилой квартал",
+             "Посмотрите на жилую архитектуру, дворики, детские площадки - увидьте город глазами местных жителей")
+        };
+
+        var pointsToCreate = Math.Min(maxPoints, routePoints.Length);
+
+        for (int i = 0; i < pointsToCreate; i++)
+        {
+            var (latOffset, lonOffset, direction, name, description) = routePoints[i];
+            var pointLat = latitude + latOffset;
+            var pointLon = longitude + lonOffset;
+
+            landmarks.Add(new HeritageObject
+            {
+                Id = $"gen_{i + 1}",
+                Name = name,
+                Latitude = pointLat,
+                Longitude = pointLon,
+                Category = "Прогулочная точка",
+                ShortDescription = description,
+                History = $"Направление на {direction}. Эта точка поможет вам исследовать характер и атмосферу района.",
+                InterestingFacts = new List<string>()
+            });
+        }
+
+        _logger.LogInformation("Created {Count} scenic landmark points for 4km route", landmarks.Count);
+        return Task.FromResult(landmarks);
     }
 
     private TourRoute BuildOptimalRoute(double startLat, double startLon, List<HeritageObject> objects)
@@ -109,18 +165,39 @@ public class RouteService : IRouteService
             return "Маршрут пуст";
 
         var sb = new StringBuilder();
-        sb.AppendLine($"📍 Маршрут включает {route.Points.Count} объектов:");
+        sb.AppendLine($"🗺️ Маршрут включает {route.Points.Count} объектов:");
         sb.AppendLine($"📏 Общая протяженность: {route.TotalDistance / 1000:F2} км");
         sb.AppendLine();
 
         foreach (var point in route.Points)
         {
-            sb.AppendLine($"{point.Order}. {point.HeritageObject.Name}");
+            sb.AppendLine($"▫️ {point.Order}. {point.HeritageObject.Name}");
             sb.AppendLine($"   📂 {point.HeritageObject.Category}");
+
+            // Добавляем краткое описание
+            if (!string.IsNullOrEmpty(point.HeritageObject.ShortDescription))
+            {
+                sb.AppendLine($"   ℹ️ {point.HeritageObject.ShortDescription}");
+            }
+
+            // Добавляем год постройки, если есть
+            if (point.HeritageObject.YearBuilt.HasValue)
+            {
+                sb.AppendLine($"   📅 Построен в {point.HeritageObject.YearBuilt} году");
+            }
+
+            // Добавляем метку ЮНЕСКО, если есть
+            if (point.HeritageObject.IsUnescoSite)
+            {
+                sb.AppendLine($"   🏛️ Объект всемирного наследия ЮНЕСКО");
+            }
+
+            // Добавляем расстояние от предыдущей точки
             if (point.Order > 1)
             {
                 sb.AppendLine($"   🚶 {point.DistanceFromPrevious:F0} м от предыдущей точки");
             }
+
             sb.AppendLine();
         }
 

@@ -226,17 +226,26 @@ public class MessageHandler
                 replyMarkup: removeKeyboard
             );
 
-            var route = await _routeService.BuildRouteAsync(location.Latitude, location.Longitude, maxPoints: 5);
+            var route = await _routeService.BuildRouteAsync(location.Latitude, location.Longitude, maxPoints: 7);
 
-            if (route == null || route.Points.Count == 0)
+            if (route == null)
             {
                 await botClient.SendTextMessageAsync(
                     chatId: message.Chat.Id,
-                    text: "😔 К сожалению, рядом с вами не найдено объектов культурного наследия.\n\n" +
+                    text: "😔 К сожалению, произошла ошибка при построении маршрута.\n\n" +
                           "Попробуйте:\n" +
-                          "• Отправить геолокацию из центральной части Казани\n" +
-                          "• Приблизиться к Казанскому Кремлю или улице Баумана\n" +
-                          "• Использовать /tour для информации о текущем месте"
+                          "• Отправить /route и геолокацию снова\n" +
+                          "• Проверить подключение к интернету"
+                );
+                return;
+            }
+
+            if (route.Points.Count == 0)
+            {
+                await botClient.SendTextMessageAsync(
+                    chatId: message.Chat.Id,
+                    text: "😔 К сожалению, не удалось построить маршрут.\n\n" +
+                          "Попробуйте отправить /route снова."
                 );
                 return;
             }
