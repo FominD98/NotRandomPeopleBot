@@ -56,6 +56,8 @@ try
             services.Configure<DeepSeekSettings>(configuration.GetSection("DeepSeek"));
             services.Configure<OpenAISettings>(configuration.GetSection("OpenAI"));
             services.Configure<YandexGptSettings>(configuration.GetSection("YandexGpt"));
+            services.Configure<YandexGeocodingSettings>(configuration.GetSection("YandexGeocoding"));
+            services.Configure<ElevenLabsSettings>(configuration.GetSection("ElevenLabs"));
             services.Configure<ConversationSettings>(configuration.GetSection("Conversation"));
             services.Configure<ContentFilterSettings>(configuration.GetSection("ContentFilter"));
             services.Configure<LoggingSettings>(configuration.GetSection("Logging"));
@@ -70,6 +72,10 @@ try
             services.AddSingleton<IConversationService, ConversationService>();
             services.AddSingleton<IContentFilterService, ContentFilterService>();
             services.AddSingleton<ILocalizationService, LocalizationService>();
+            services.AddSingleton<IYandexGeocodingService, YandexGeocodingService>();
+            services.AddSingleton<IElevenLabsService, ElevenLabsService>();
+            services.AddSingleton<YandexGptService>();
+            services.AddSingleton<ITourGuideService, TourGuideService>();
             services.AddSingleton<CommandHandler>();
             services.AddSingleton<MessageHandler>();
 
@@ -113,6 +119,13 @@ try
             {
                 if (update.Message is not { } message)
                     return;
+
+                // Handle location messages
+                if (message.Type == MessageType.Location)
+                {
+                    await messageHandler.HandleLocationMessageAsync(client, message);
+                    return;
+                }
 
                 if (message.Type != MessageType.Text)
                     return;
