@@ -13,7 +13,7 @@ public class HeritageService : IHeritageService
     public HeritageService(ILogger<HeritageService> logger)
     {
         _logger = logger;
-        _dataFilePath = Path.Combine(AppContext.BaseDirectory, "Data", "heritage_objects.json");
+        _dataFilePath = Path.Combine(AppContext.BaseDirectory, "Data", "heritage_objects_full.json");
         LoadHeritageObjects();
     }
 
@@ -70,6 +70,33 @@ public class HeritageService : IHeritageService
     public Task<List<HeritageObject>> GetAllObjectsAsync()
     {
         return Task.FromResult(_heritageObjects);
+    }
+
+    public Task<List<HeritageObject>> GetByDistrictAsync(string district)
+    {
+        var objects = _heritageObjects
+            .Where(o => o.District.Contains(district, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return Task.FromResult(objects);
+    }
+
+    public Task<List<HeritageObject>> SearchByNameAsync(string query)
+    {
+        var objects = _heritageObjects
+            .Where(o => o.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return Task.FromResult(objects);
+    }
+
+    public Task<List<string>> GetDistrictsAsync()
+    {
+        var districts = _heritageObjects
+            .Select(o => o.District)
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
+        return Task.FromResult(districts);
     }
 
     // Haversine formula для расчета расстояния между двумя точками на Земле

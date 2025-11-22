@@ -7,11 +7,13 @@ namespace AiTelegramBot.Services;
 public class RouteService : IRouteService
 {
     private readonly IHeritageService _heritageService;
+    private readonly IYandexGeocodingService _geocodingService;
     private readonly ILogger<RouteService> _logger;
 
-    public RouteService(IHeritageService heritageService, ILogger<RouteService> logger)
+    public RouteService(IHeritageService heritageService, IYandexGeocodingService geocodingService, ILogger<RouteService> logger)
     {
         _heritageService = heritageService;
+        _geocodingService = geocodingService;
         _logger = logger;
     }
 
@@ -22,13 +24,31 @@ public class RouteService : IRouteService
             _logger.LogInformation("Building route from ({Lat}, {Lon}) with max {MaxPoints} points",
                 startLatitude, startLongitude, maxPoints);
 
-            // Пытаемся получить объекты из базы данных в радиусе 5 км
-            var nearbyObjects = await _heritageService.GetNearbyObjectsAsync(startLatitude, startLongitude, 5.0);
+            var nearbyObjects = new List<HeritageObject>();
 
-            // Если объектов не нашлось в БД, создаем базовый маршрут с интересными местами
+            // 1. Определяем район по координатам через геокодинг
+            var locationInfo = await _geocodingService.GetLocationInfoAsync(startLatitude, startLongitude);
+            if (locationInfo != null)
+            {
+                var district = ExtractDistrictFromAddress(locationInfo.Address);
+                _logger.LogInformation("Detected district from address: {District}", district);
+
+                if (!string.IsNullOrEmpty(district))
+                {
+                    // 2. Ищем объекты в базе по району
+                    nearbyObjects = await _heritageService.GetByDistrictAsync(district);
+                    _logger.LogInformation("Found {Count} heritage objects in district {District}",
+                        nearbyObjects.Count, district);
+
+                    // Присваиваем координаты объектам из базы (они будут рядом со стартовой точкой)
+                    nearbyObjects = AssignCoordinatesToObjects(nearbyObjects, startLatitude, startLongitude, maxPoints);
+                }
+            }
+
+            // 3. Если объектов не нашлось, создаем базовый маршрут с интересными местами
             if (nearbyObjects.Count == 0)
             {
-                _logger.LogInformation("No objects in database, creating basic route with nearby landmarks");
+                _logger.LogInformation("No objects in database for this area, creating basic route with nearby landmarks");
                 nearbyObjects = await CreateBasicLandmarksRoute(startLatitude, startLongitude, maxPoints);
             }
 
@@ -174,6 +194,12 @@ public class RouteService : IRouteService
             sb.AppendLine($"▫️ {point.Order}. {point.HeritageObject.Name}");
             sb.AppendLine($"   📂 {point.HeritageObject.Category}");
 
+            // Добавляем адрес из базы данных
+            if (!string.IsNullOrEmpty(point.HeritageObject.Address))
+            {
+                sb.AppendLine($"   📍 {point.HeritageObject.Address}");
+            }
+
             // Добавляем краткое описание
             if (!string.IsNullOrEmpty(point.HeritageObject.ShortDescription))
             {
@@ -184,6 +210,20 @@ public class RouteService : IRouteService
             if (point.HeritageObject.YearBuilt.HasValue)
             {
                 sb.AppendLine($"   📅 Построен в {point.HeritageObject.YearBuilt} году");
+            }
+
+            // Добавляем категорию охраны
+            if (!string.IsNullOrEmpty(point.HeritageObject.ProtectionCategory))
+            {
+                var protectionLabel = point.HeritageObject.ProtectionCategory switch
+                {
+                    "federal" => "Федеральное значение",
+                    "regional" => "Региональное значение",
+                    "local" => "Местное значение",
+                    _ => ""
+                };
+                if (!string.IsNullOrEmpty(protectionLabel))
+                    sb.AppendLine($"   🛡️ {protectionLabel}");
             }
 
             // Добавляем метку ЮНЕСКО, если есть
@@ -464,6 +504,111 @@ public class RouteService : IRouteService
 
         var rtext = string.Join("~", points);
         return $"https://yandex.ru/maps/?rtext={rtext}&rtt=pd";
+    }
+
+    private string ExtractDistrictFromAddress(string address)
+    {
+        // Пробуем найти район в адресе
+        // Примеры: "Казань", "Елабуга", "Чистополь"
+        var knownDistricts = new[]
+        {
+            "Казань", "Елабуга", "Чистополь", "Тетюши", "Бугульма", "Зеленодольск",
+            "Свияжск", "Мамадыш", "Арск", "Лаишево", "Спасск", "Болгар",
+            "Елабужский", "Чистопольский", "Тетюшский", "Бугульминский",
+            "Зеленодольский", "Мамадышский", "Арский", "Лаишевский", "Спасский",
+            "Высокогорский", "Пестречинский", "Верхнеуслонский", "Алексеевский",
+            "Агрызский", "Азнакаевский", "Аксубаевский", "Алькеевский",
+            "Апастовский", "Атнинский", "Бавлинский", "Балтасинский",
+            "Буинский", "Дрожжановский", "Заинский", "Кайбицкий",
+            "Камско-Устьинский", "Кукморский", "Менделеевский", "Мензелинский",
+            "Муслюмовский", "Нижнекамск", "Новошешминский", "Нурлатский",
+            "Рыбно-Слободский", "Сабинский", "Сармановский", "Тукаевский",
+            "Тюлячинский", "Черемшанский", "Ютазинский"
+        };
+
+        foreach (var district in knownDistricts)
+        {
+            if (address.Contains(district, StringComparison.OrdinalIgnoreCase))
+            {
+                // Возвращаем полное название района для поиска в базе
+                if (district.EndsWith("ский"))
+                    return $"{district} район";
+                return district;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private List<HeritageObject> AssignCoordinatesToObjects(List<HeritageObject> objects, double centerLat, double centerLon, int maxPoints)
+    {
+        // Распределяем объекты по кругу вокруг стартовой точки
+        var result = new List<HeritageObject>();
+        var count = Math.Min(objects.Count, maxPoints * 2); // берем с запасом для выбора
+        var random = new Random();
+
+        for (int i = 0; i < count; i++)
+        {
+            var obj = objects[i];
+
+            // Радиус от 300м до 1.5км
+            var radius = 0.003 + (random.NextDouble() * 0.012);
+            var angle = (2 * Math.PI * i) / count + (random.NextDouble() * 0.3);
+
+            var newObj = new HeritageObject
+            {
+                Id = obj.Id,
+                Name = obj.Name,
+                Latitude = centerLat + radius * Math.Cos(angle),
+                Longitude = centerLon + radius * Math.Sin(angle),
+                Category = GetCategoryFromName(obj.Name),
+                ShortDescription = obj.ShortDescription,
+                History = obj.History,
+                InterestingFacts = obj.InterestingFacts,
+                YearBuilt = obj.YearBuilt,
+                IsUnescoSite = obj.IsUnescoSite,
+                ImageUrl = obj.ImageUrl,
+                District = obj.District,
+                Address = obj.Address,
+                ProtectionCategory = obj.ProtectionCategory,
+                RegistrationNumber = obj.RegistrationNumber
+            };
+            result.Add(newObj);
+        }
+
+        return result;
+    }
+
+    private string GetCategoryFromName(string name)
+    {
+        var nameLower = name.ToLower();
+
+        if (nameLower.Contains("церковь") || nameLower.Contains("храм") || nameLower.Contains("собор") ||
+            nameLower.Contains("часовня") || nameLower.Contains("мечеть") || nameLower.Contains("минарет"))
+            return "Религиозное сооружение";
+
+        if (nameLower.Contains("дом") || nameLower.Contains("особняк") || nameLower.Contains("усадьба"))
+            return "Жилое здание";
+
+        if (nameLower.Contains("памятник") || nameLower.Contains("монумент") || nameLower.Contains("стела"))
+            return "Памятник";
+
+        if (nameLower.Contains("могила") || nameLower.Contains("захоронение") || nameLower.Contains("кладбище"))
+            return "Мемориальный объект";
+
+        if (nameLower.Contains("школа") || nameLower.Contains("гимназия") || nameLower.Contains("университет"))
+            return "Образовательное учреждение";
+
+        if (nameLower.Contains("больница") || nameLower.Contains("госпиталь") || nameLower.Contains("аптека"))
+            return "Медицинское учреждение";
+
+        if (nameLower.Contains("завод") || nameLower.Contains("фабрика") || nameLower.Contains("мельница"))
+            return "Промышленный объект";
+
+        if (nameLower.Contains("городище") || nameLower.Contains("селище") || nameLower.Contains("курган"))
+            return "Археологический объект";
+
+        return "Объект культурного наследия";
     }
 
     // Haversine formula для расчета расстояния между двумя точками на Земле

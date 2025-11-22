@@ -13,4 +13,8 @@ public class HeritageObject
     public int? YearBuilt { get; set; }
     public bool IsUnescoSite { get; set; }
     public string ImageUrl { get; set; } = string.Empty;
+    public string District { get; set; } = string.Empty;
+    public string Address { get; set; } = string.Empty;
+    public string ProtectionCategory { get; set; } = string.Empty; // federal, regional, local
+    public string RegistrationNumber { get; set; } = string.Empty;
 }
